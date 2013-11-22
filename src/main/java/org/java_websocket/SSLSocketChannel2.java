@@ -167,6 +167,8 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 		int appBufferMax = session.getApplicationBufferSize();
 		int netBufferMax = session.getPacketBufferSize();
 
+        appBufferMax = Math.max(appBufferMax, netBufferMax);
+
 		if( inData == null ) {
 			inData = ByteBuffer.allocate( appBufferMax );
 			outCrypt = ByteBuffer.allocate( netBufferMax );
