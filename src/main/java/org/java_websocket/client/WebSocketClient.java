@@ -1,6 +1,7 @@
 package org.java_websocket.client;
 
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -54,9 +55,9 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 
 	private ByteChannel wrappedchannel = null;
 
-	private Thread writethread;
+	private WeakReference<Thread> writethread;
 
-	private Thread readthread;
+	private WeakReference<Thread> readthread;
 
 	private Draft draft;
 
@@ -134,10 +135,11 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 	 * <var>setURI</var>.
 	 */
 	public void connect() {
-		if( writethread != null )
+		if( readthread != null )
 			throw new IllegalStateException( "WebSocketClient objects are not reuseable" );
-		writethread = new Thread( this );
-		writethread.start();
+		Thread reader = new Thread(this, "WSC Read");
+		reader.start();
+		readthread = new WeakReference<Thread>(reader);
 	}
 
 	/**
@@ -153,6 +155,14 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 	public void close() {
 		if( writethread != null ) {
 			conn.close( CloseFrame.NORMAL );
+		}
+		// Channel may be in a blocking read process that connection's
+		// close won't break, so, we should force stopping.
+		try {
+			if( readthread != null )
+				channel.close();
+		} catch (IOException ioe) {
+			conn.eot();
 		}
 	}
 
@@ -184,7 +194,7 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 	// Runnable IMPLEMENTATION /////////////////////////////////////////////////
 	public void run() {
 		if( writethread == null )
-			writethread = Thread.currentThread();
+			writethread = new WeakReference<Thread>(Thread.currentThread());
 		interruptableRun();
 
 		assert ( !channel.isOpen() );
@@ -212,8 +222,10 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 
 			timeout = 0; // since connect is over
 			sendHandshake();
-			readthread = new Thread( new WebsocketWriteThread() );
-			readthread.start();
+
+			Thread writer = new Thread( new WebsocketWriteThread() );
+			writer.start();
+			writethread = new WeakReference<Thread>(writer);
 		} catch ( ClosedByInterruptException e ) {
 			onWebsocketError( null, e );
 			return;
@@ -225,7 +237,7 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 
 		ByteBuffer buff = ByteBuffer.allocate( WebSocketImpl.RCVBUF );
 		try/*IO*/{
-			while ( channel.isOpen() ) {
+			while ( !conn.isClosed() ) {
 				if( SocketChannelIOHelper.read( buff, this.conn, wrappedchannel ) ) {
 					conn.decode( buff );
 				} else {
@@ -242,6 +254,7 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 					}
 				}
 			}
+			conn.eot();
 
 		} catch ( CancelledKeyException e ) {
 			conn.eot();
@@ -337,8 +350,16 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 	public final void onWebsocketClose( WebSocket conn, int code, String reason, boolean remote ) {
 		connectLatch.countDown();
 		closeLatch.countDown();
-		if( readthread != null )
-			readthread.interrupt();
+		if( readthread != null && null != readthread.get())
+			readthread.get().interrupt();
+		if( writethread != null && null != writethread.get())
+			writethread.get().interrupt();
+		try {
+			if( channel != null )
+				channel.socket().close();
+		} catch ( IOException e ) {
+			onWebsocketError( null, e );
+		}
 		onClose( code, reason, remote );
 	}
 
@@ -434,7 +455,7 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 	private class WebsocketWriteThread implements Runnable {
 		@Override
 		public void run() {
-			Thread.currentThread().setName( "WebsocketWriteThread" );
+			Thread.currentThread().setName( "WSC Write" );
 			try {
 				while ( !Thread.interrupted() ) {
 					SocketChannelIOHelper.writeBlocking( conn, wrappedchannel );
