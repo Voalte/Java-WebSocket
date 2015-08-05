@@ -93,6 +93,15 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 		}
 	}
 
+	private void readInData() throws IOException {
+		inCrypt.compact();
+		int read = socketChannel.read( inCrypt );
+		if( read == -1 ) {
+			throw new IOException( "connection closed unexpectedly by peer" );
+		}
+		inCrypt.flip();
+	}
+
 	private synchronized void processHandshake() throws IOException {
 		if( engineResult.getHandshakeStatus() == HandshakeStatus.NOT_HANDSHAKING )
 			return; // since this may be called either from a reading or a writing thread and because this method is synchronized it is necessary to double check if we are still handshaking.
@@ -112,12 +121,7 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 
 		if( engineResult.getHandshakeStatus() == SSLEngineResult.HandshakeStatus.NEED_UNWRAP ) {
 			if( !isBlocking() || engineStatus == Status.BUFFER_UNDERFLOW ) {
-				inCrypt.compact();
-				int read = socketChannel.read( inCrypt );
-				if( read == -1 ) {
-					throw new IOException( "connection closed unexpectedly by peer" );
-				}
-				inCrypt.flip();
+				readInData();
 			}
 			inData.compact();
 			unwrap();
@@ -143,13 +147,14 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 		return outCrypt;
 	}
 
-	private synchronized ByteBuffer unwrap() throws SSLException {
+	private synchronized ByteBuffer unwrap() throws IOException {
 		int rem;
 		do {
+			if(inCrypt.remaining() == 0) readInData();
 			rem = inData.remaining();
 			engineResult = sslEngine.unwrap( inCrypt, inData );
 			engineStatus = engineResult.getStatus();
-		} while ( engineStatus == SSLEngineResult.Status.OK && ( rem != inData.remaining() || engineResult.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP ) );
+		} while ( engineStatus == SSLEngineResult.Status.OK && rem != inData.remaining() && engineResult.getHandshakeStatus() == HandshakeStatus.NEED_UNWRAP );
 
 		inData.flip();
 		return inData;
@@ -245,7 +250,7 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 		return transfered;
 	}
 
-	private int readRemaining( ByteBuffer dst ) throws SSLException {
+	private int readRemaining( ByteBuffer dst ) throws IOException {
 		if( inData.hasRemaining() ) {
 			return transfereTo( inData, dst );
 		}
@@ -319,7 +324,7 @@ public class SSLSocketChannel2 implements ByteChannel, WrappedByteChannel {
 	}
 
 	@Override
-	public int readMore( ByteBuffer dst ) throws SSLException {
+	public int readMore( ByteBuffer dst ) throws IOException {
 		return readRemaining( dst );
 	}
 
