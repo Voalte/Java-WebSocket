@@ -244,7 +244,9 @@ public abstract class WebSocketClient extends WebSocketAdapter implements Runnab
 					conn.eot();
 				}
 
-				if( wrappedchannel instanceof WrappedByteChannel ) {
+				// Check connection status again as WebSocketImpl#flushAndClose may break
+				// previous blocking read but, then, get caught here
+				if( !conn.isClosed() && wrappedchannel instanceof WrappedByteChannel ) {
 					WrappedByteChannel w = (WrappedByteChannel) wrappedchannel;
 					if( w.isNeedRead() ) {
 						while ( SocketChannelIOHelper.readMore( buff, conn, w ) ) {
