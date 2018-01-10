@@ -9,7 +9,7 @@ repositories {
 }
 
 group = 'org.java_websocket'
-version = '1.3.1.2-SNAPSHOT'
+version = '1.3.1.4-SNAPSHOT'
 sourceCompatibility = 1.6
 targetCompatibility = 1.6
 
@@ -29,16 +29,15 @@ dependencies {
 
 
 //deploy to maven repository
-//uploadArchives {
-//    repositories.mavenDeployer {
-//        configuration = configurations.deployerJars
-//        repository(url: repositoryUrl) {
-//			authentication(userName: repositoryUsername, password: repositoryPassword)
-//		}
-//    }
-//}
+uploadArchives {
+    repositories.mavenDeployer {
+        configuration = configurations.deployerJars
+        repository(url: voalteMavenRepoUrl) {
+            authentication(userName: voalteMavenUsername, password: voalteMavenPassword)
+        }
+    }
+}
 
 task wrapper(type: Wrapper) {
     gradleVersion = '1.4'
 }
-
